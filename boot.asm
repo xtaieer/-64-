@@ -3,6 +3,9 @@ org 0x7c00
 
 BaseOfStack equ 0x7c00
 
+BaseOfLoader	equ	0x1000
+OffsetOfLoader	equ	0x00
+
 RootDirSectors                  equ 14     ;根目录的扇区数量 （14 * 512 / 32）
 SectorNumOfRootDirStart         equ 19     ; 根目录起始的扇区号
 SectorNumOfFAT1Start            equ 1      ; FAT1开始的扇区编号
@@ -58,8 +61,6 @@ Label_Go_On_Reading:
     add esp, 2
     pop bp
     ret
-
-
 
 Label_Start:
     mov ax, cs
@@ -191,10 +192,10 @@ Label_Go_On_Loading_File:
     mov dx, RootDirSectors
     add ax, dx
     add ax, SectorBalance
-    add bx, [BPB_BytesPerSec]
+    add bx, [BPB_BytesPreSec]
     jmp Label_Go_On_Loading_File
 
-Label_File_lLoaded:
+Label_File_Loaded:
     jmp $
 
 ;========== get FAT Entry
@@ -223,11 +224,11 @@ Func_GetFATEntry:
 Label_Even:
 ; 读取两个扇区的FAT表的内容到内存，用于一会儿的查询
     xor dx, dx
-    mov bx, [BPB_BytesPerSec]
+    mov bx, [BPB_BytesPreSec]
     div bx
     push dx
     mov bx, 0x8000
-    add ax, SectorNumOfFATStart
+    add ax, SectorNumOfFAT1Start
     mov cl, 2
     call Func_ReadOneSector
 
@@ -238,7 +239,7 @@ Label_Even:
     jnz Label_Even_2
     shr ax, 4
 
-Label_Even_2
+Label_Even_2:
     and ax, 0x0fff
     pop bx
     pop es
