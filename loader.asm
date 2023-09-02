@@ -17,7 +17,7 @@ SectorNumOfRootDirStart         equ 19     ; 根目录起始的扇区号
 SectorNumOfFAT1Start            equ 1      ; FAT1开始的扇区编号
 SectorBalance                   equ 17
 
-section code
+section code vstart=0x10000
 
     ; 跳转到开始处开始执行
     jmp Label_Start
@@ -117,10 +117,10 @@ Label_Start:
 ; 进入保护模式
     lgdt [gdt_ptr]
     mov eax, cr0
-    or eax, 0x10
+    or eax, 0x01
     mov cr0, eax
 
-    mov ax, 0x80
+    mov ax, 0x10
     mov fs, ax
 
     mov eax, cr0
@@ -130,6 +130,29 @@ Label_Start:
     sti ;退出保护模式后恢复中断
 
 ; 下一步就是从软盘中找到kerneL.bin并加装到指定的地址处
+; 查询硬件信息放入到指定位置
+; 下面准备进入模式切换
+; 进入32位保护模式
+    cli  ;关闭中断，没有准备中断描述符表
+    lgdt [gdt_ptr]
+    mov eax, cr0
+    or eax, 0x01
+    mov cr0, eax
+    ; 此时还只是16位的保护模式
+    jmp dword 0x08:Label_Protection_Mode
+Label_Protection_Mode:
+    [bits 32] ; 以后的代码都是32位的编译方式
+    ; 初始化所有的数据段
+    mov eax, 0x10
+    mov ds, ax
+    mov fs, ax
+    mov gs, ax
+    mov es, ax
+    mov ss, ax
+    mov sp, 0x7e00
+
+    hlt
+; 进入ia-e32模式
 
 ; ====== search kernel.bin
 ; 基本的工作方式就是从软盘中读取一个扇区的内容到指定的内容，
