@@ -149,11 +149,87 @@ Label_Protection_Mode:
     mov gs, ax
     mov es, ax
     mov ss, ax
-    mov sp, 0x7e00
+    mov esp, 0x7e00
 
-    hlt
 ; 进入ia-e32模式
+; 跳过了ia-e32模式的校验
+; 准备ia-e32模式下段描述符表
+    lgdt [0x10000 + gdt64_ptr]
 
+; 准备ia-e32模式下的页表，开启PAE模式, 设置cr3
+; 设置页表就需要考虑到页表所在的内存位置，以及页表的内容，几级页表
+; 页表所在的线性地址为0x90000, 是开启PAR模式下的页表，每一个页表项位是8个字节
+        ; 每一个页表都是4kb的大小，表现在地址上就是相差0x1000
+        ; 3级页表, 2MB的物理页面大小
+        ; 页目录表的基地址为0x90000 , PML4E
+	mov	dword	[0x90000],	0x91007
+	mov	dword	[0x90004],	0x00000
+        ; 两个页目录表项指向同一个页表
+        ; 这样做是会存在套不同的线性地址映射到同一个物理地址
+        ; 0x0 - 0xbfffff  -> 0x0 - 0xbfffff
+        ; 不想算了
+	mov	dword	[0x90800],	0x91007
+	mov	dword	[0x90804],	0x00000
+
+        ; PDPT
+	mov	dword	[0x91000],	0x92007
+	mov	dword	[0x91004],	0x00000
+
+        ; PDT + PTE
+        ; 完成低12MB的物理地址的物理地址映射
+	mov	dword	[0x92000],	0x000083
+	mov	dword	[0x92004],	0x000000
+
+	mov	dword	[0x92008],	0x200083
+	mov	dword	[0x9200c],	0x000000
+
+	mov	dword	[0x92010],	0x400083
+	mov	dword	[0x92014],	0x000000
+
+	mov	dword	[0x92018],	0x600083
+	mov	dword	[0x9201c],	0x000000
+
+	mov	dword	[0x92020],	0x800083
+	mov	dword	[0x92024],	0x000000
+
+	mov	dword	[0x92028],	0xa00083
+	mov	dword	[0x9202c],	0x000000
+
+
+        ; 开启pae模式，置位cr4中的第5位
+        mov eax, cr4
+        or eax, 0x20
+	mov cr4, eax
+
+        mov eax, 0x90000
+        mov cr3, eax
+
+; 开启ia-e32模式
+
+	mov ecx, 0x0c0000080		;IA32_EFER
+	rdmsr
+
+	or eax,	0x100
+	wrmsr
+
+; 开启分页, 进入ia-e32模式
+       	mov eax, cr0
+        or eax, 0x8000_0001
+	mov	cr0,	eax
+
+; 执行一次远跳转设置CS寄存器以及清除指令流水线
+        jmp 0x08:Label_IA_E32
+Label_IA_E32:
+        [bits 64]
+        mov ax, 0x10
+        mov ds, ax
+        mov es, ax
+        mov gs, ax
+        mov fs, ax
+        mov ss, ax
+        mov rsp, 0x7e00
+
+        [bits 16]
 ; ====== search kernel.bin
 ; 基本的工作方式就是从软盘中读取一个扇区的内容到指定的内容，
 ; 然后遍历该扇区中的所有的目录项，寻找和目标匹配的目录项
@@ -298,6 +374,15 @@ gdt_ptr:
     dw ($ - gdt32 - 1)
     dd 0x10000 + gdt32
 
+section gdt64 align=8
+gdt64:
+    dd 0x0, 0x0 ; 空段
+    dd 0x00000000, 0x00209800   ; 代码段 0x08
+    dd 0x00000000, 0x00209200   ; 数据段 0x10
+
+gdt64_ptr:
+    dw ($ - gdt64 - 1)
+    dd 0x10000 + gdt64
 
 ; fat12文件格式相关得定义
 section fat12
