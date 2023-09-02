@@ -128,7 +128,9 @@ Label_Start:
     mov cr0, eax
 
     sti ;退出保护模式后恢复中断
-    hlt
+
+; 下一步就是从软盘中找到kerneL.bin并加装到指定的地址处
+
 ; ====== search kernel.bin
 ; 基本的工作方式就是从软盘中读取一个扇区的内容到指定的内容，
 ; 然后遍历该扇区中的所有的目录项，寻找和目标匹配的目录项
@@ -137,35 +139,37 @@ Label_Start:
 Lable_Search_In_Root_Dir_Begin:
 
 	cmp	word	[RootDirSizeForLoop],	0
-	jz	Label_No_LoaderBin
-	dec	word	[RootDirSizeForLoop]
+	jz	Label_No_KernelBin
+	dec	word	[RootDirSizeForLoop]    ; 根目录的扇区数，确定了循环次数
+
 	mov	ax,	00h
 	mov	es,	ax
 	mov	bx,	8000h
 	mov	ax,	[SectorNo]
 	mov	cl,	1
-	call	Func_ReadOneSector
-	mov	si,	KernelFileName
-	mov	di,	8000h
-	cld
-	mov	dx,	10h
+	call	Func_ReadOneSector              ; 读取一个扇区到0x8000地址处
 
-Label_Search_For_LoaderBin:
+	mov	si,	KernelFileName
+	mov	di,	8000h                   ; 一个扇区内容所在的地址
+	cld
+	mov	dx,	10h                     ; 一个扇区512B（0x200），一个根目录项32B (0x20), 一个扇区共有 0x10个目录项
+
+Label_Search_For_KernelBin:
 
 	cmp	dx,	0
-	jz	Label_Goto_Next_Sector_In_Root_Dir
+	jz	Label_Goto_Next_Sector_In_Root_Dir   ; 一个扇区遍历完成后没有找个，准备去下一个扇区寻找
 	dec	dx
-	mov	cx,	11
+	mov	cx,	11                           ; 在根目录项中，文件占据11B，文件名8B，扩展名3B
 
 Label_Cmp_FileName:
 
 	cmp	cx,	0
-	jz	Label_FileName_Found
+	jz	Label_FileName_Found                  ; 成功比对出目标文件名
 	dec	cx
 	lodsb
-	cmp	al,	byte	[es:di]
-	jz	Label_Go_On
-	jmp	Label_Different
+	cmp	al,	byte	[es:di]                ; 一次只比较一个字节的内容
+	jz	Label_Go_On                            ; 准备比较下一个字节的内容
+	jmp	Label_Different                        ; 名字不同，准备比较下一个目录项
 
 Label_Go_On:
 
@@ -177,7 +181,7 @@ Label_Different:
 	and	di,	0ffe0h
 	add	di,	20h
 	mov	si,	KernelFileName
-	jmp	Label_Search_For_LoaderBin
+	jmp	Label_Search_For_KernelBin
 
 Label_Goto_Next_Sector_In_Root_Dir:
 
@@ -186,7 +190,7 @@ Label_Goto_Next_Sector_In_Root_Dir:
 
 ;=======	display on screen : ERROR:No LOADER Found
 
-Label_No_LoaderBin:
+Label_No_KernelBin:                                       ; 遍历了整个根目录区也未找到目标文件的逻辑处理，打印一个错误消息，死循环
 
 	mov	ax,	1301h
 	mov	bx,	008ch
@@ -200,40 +204,45 @@ Label_No_LoaderBin:
 	int	10h
 	jmp	$
 
-;=======	found loader.bin name in root director struct
+;=======	found kernel.bin name in root director struct
 
-Label_FileName_Found:
+Label_FileName_Found:                                   ; 找到了目标文件的逻辑处理
 
 	mov	ax,	RootDirSectors
-	and	di,	0ffe0h
-	add	di,	01ah
+	and	di,	0ffe0h                          ; 32字节对齐，使得di为目录目录项的基地址，后续定位起始簇号使用
+	add	di,	01ah                            ; 0x1a 起始簇号偏移
 	mov	cx,	word	[es:di]
 	push	cx
 	add	cx,	ax
 	add	cx,	SectorBalance
-	mov	ax,	BaseOfLoader
+
+	mov	ax,	BaseOfLoader                    ;准备目标的加载地址为es:bx
 	mov	es,	ax
 	mov	bx,	OffsetOfLoader
+
 	mov	ax,	cx
 
-Label_Go_On_Loading_File:
+Label_Go_On_Loading_File:                               ; 开始加载目标文件
 	push	ax
 	push	bx
 	mov	ah,	0eh
 	mov	al,	'.'
 	mov	bl,	0fh
-	int	10h
+	int	10h                                     ; 使用中断显示一个字符
+
 	pop	bx
 	pop	ax
 
 	mov	cl,	1
-	call	Func_ReadOneSector
+	call	Func_ReadOneSector                      ; 读取一个扇区内容到指定es:bx
+
 	pop	ax
-	call	Func_GetFATEntry
+	call	Func_GetFATEntry                        ; 计算文件的下一个簇号
 	cmp	ax,	0fffh
-	jz	Label_File_Loaded
+	jz	Label_File_Loaded                       ; 文件完成加载
+
 	push	ax
-	mov	dx,	RootDirSectors
+	mov	dx,	RootDirSectors                  ; 开始文件的下一个簇的加载
 	add	ax,	dx
 	add	ax,	SectorBalance
 	add	bx,	[BPB_BytesPerSec]
@@ -241,7 +250,8 @@ Label_Go_On_Loading_File:
 
 Label_File_Loaded:
 
-	jmp	BaseOfLoader:OffsetOfLoader
+	jmp	BaseOfLoader:OffsetOfLoader             ; 跳转到目标位置开始执行
+
 
 ; 定义加载所需要的数据
 section data
@@ -254,6 +264,7 @@ section data
     RootDirSizeForLoop dw RootDirSectors
     KernelFileName   db 'KERNEL  BIN'
 
+; 段描述符相关的定义
 section gdt32 align=8
 gdt32:
     dd 0x0, 0x0 ;空段            0x0
@@ -265,7 +276,7 @@ gdt_ptr:
     dd 0x10000 + gdt32
 
 
-
+; fat12文件格式相关得定义
 section fat12
     BS_OEMName        db 'MINEboot'
     BPB_BytesPerSec   dw 512
