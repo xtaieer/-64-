@@ -9,8 +9,12 @@
 ; 第一行代码所面临的问题就是，重定向的问题，loader代码的起始地址要如果约定，
 ; 依赖于loader被加载的位置，要与boot提前进行约定。
 
-BaseOfLoader	equ	0x1000
-OffsetOfLoader	equ	0x00
+BaseOfKernelFile	equ	0x00
+OffsetOfKernelFile	equ	0x100000
+
+; 内核加载的临时转存区域，
+BaseTmpOfKernelAddr	equ	0x00
+OffsetTmpOfKernelFile	equ	0x7e00
 
 RootDirSectors                  equ 14     ;根目录的扇区数量 （14 * 512 / 32）
 SectorNumOfRootDirStart         equ 19     ; 根目录起始的扇区号
@@ -130,106 +134,12 @@ Label_Start:
     sti ;退出保护模式后恢复中断
 
 ; 下一步就是从软盘中找到kerneL.bin并加装到指定的地址处
-; 查询硬件信息放入到指定位置
-; 下面准备进入模式切换
-; 进入32位保护模式
-    cli  ;关闭中断，没有准备中断描述符表
-    lgdt [gdt_ptr]
-    mov eax, cr0
-    or eax, 0x01
-    mov cr0, eax
-    ; 此时还只是16位的保护模式
-    jmp dword 0x08:Label_Protection_Mode
-Label_Protection_Mode:
-    [bits 32] ; 以后的代码都是32位的编译方式
-    ; 初始化所有的数据段
-    mov eax, 0x10
-    mov ds, ax
-    mov fs, ax
-    mov gs, ax
-    mov es, ax
-    mov ss, ax
-    mov esp, 0x7e00
+;=======	reset floppy
 
-; 进入ia-e32模式
-; 跳过了ia-e32模式的校验
-; 准备ia-e32模式下段描述符表
-    lgdt [0x10000 + gdt64_ptr]
+	xor	ah,	ah
+	xor	dl,	dl
+	int	13h
 
-; 准备ia-e32模式下的页表，开启PAE模式, 设置cr3
-; 设置页表就需要考虑到页表所在的内存位置，以及页表的内容，几级页表
-; 页表所在的线性地址为0x90000, 是开启PAR模式下的页表，每一个页表项位是8个字节
-        ; 每一个页表都是4kb的大小，表现在地址上就是相差0x1000
-        ; 3级页表, 2MB的物理页面大小
-        ; 页目录表的基地址为0x90000 , PML4E
-	mov	dword	[0x90000],	0x91007
-	mov	dword	[0x90004],	0x00000
-        ; 两个页目录表项指向同一个页表
-        ; 这样做是会存在套不同的线性地址映射到同一个物理地址
-        ; 0x0 - 0xbfffff  -> 0x0 - 0xbfffff
-        ; 不想算了
-	mov	dword	[0x90800],	0x91007
-	mov	dword	[0x90804],	0x00000
-
-        ; PDPT
-	mov	dword	[0x91000],	0x92007
-	mov	dword	[0x91004],	0x00000
-
-        ; PDT + PTE
-        ; 完成低12MB的物理地址的物理地址映射
-	mov	dword	[0x92000],	0x000083
-	mov	dword	[0x92004],	0x000000
-
-	mov	dword	[0x92008],	0x200083
-	mov	dword	[0x9200c],	0x000000
-
-	mov	dword	[0x92010],	0x400083
-	mov	dword	[0x92014],	0x000000
-
-	mov	dword	[0x92018],	0x600083
-	mov	dword	[0x9201c],	0x000000
-
-	mov	dword	[0x92020],	0x800083
-	mov	dword	[0x92024],	0x000000
-
-	mov	dword	[0x92028],	0xa00083
-	mov	dword	[0x9202c],	0x000000
-
-
-        ; 开启pae模式，置位cr4中的第5位
-        mov eax, cr4
-        or eax, 0x20
-	mov cr4, eax
-
-        mov eax, 0x90000
-        mov cr3, eax
-
-; 开启ia-e32模式
-
-	mov ecx, 0x0c0000080		;IA32_EFER
-	rdmsr
-
-	or eax,	0x100
-	wrmsr
-
-; 开启分页, 进入ia-e32模式
-       	mov eax, cr0
-        or eax, 0x8000_0001
-	mov	cr0,	eax
-
-; 执行一次远跳转设置CS寄存器以及清除指令流水线
-        jmp 0x08:Label_IA_E32
-Label_IA_E32:
-        [bits 64]
-        mov ax, 0x10
-        mov ds, ax
-        mov es, ax
-        mov gs, ax
-        mov fs, ax
-        mov ss, ax
-        mov rsp, 0x7e00
-
-        [bits 16]
 ; ====== search kernel.bin
 ; 基本的工作方式就是从软盘中读取一个扇区的内容到指定的内容，
 ; 然后遍历该扇区中的所有的目录项，寻找和目标匹配的目录项
@@ -315,9 +225,9 @@ Label_FileName_Found:                                   ; 找到了目标文件�
 	add	cx,	ax
 	add	cx,	SectorBalance
 
-	mov	ax,	BaseOfLoader                    ;准备目标的加载地址为es:bx
+	mov	ax,	BaseTmpOfKernelAddr                    ;准备目标的加载地址为es:bx
 	mov	es,	ax
-	mov	bx,	OffsetOfLoader
+	mov	bx,	OffsetTmpOfKernelFile
 
 	mov	ax,	cx
 
@@ -334,8 +244,32 @@ Label_Go_On_Loading_File:                               ; 开始加载目标文�
 
 	mov	cl,	1
 	call	Func_ReadOneSector                      ; 读取一个扇区内容到指定es:bx
-
 	pop	ax
+
+; 把读取到的内核内容转存到目标地址处
+    push ax
+    push cx
+    push si
+    push edi
+
+    mov cx, 0x200 ; 一簇512（0x200）个字节
+        ; 跳过fs的设置
+    mov si,  OffsetTmpOfKernelFile ;转存的源地址, 每次转存是一样的
+    mov edi, [OffsetOfKernelFileCount] ; 目标地址，每次执行转存时目标地址都不同，把目标地址记录在内存中
+
+Label_Move_kernel:
+    mov al, [es:si]
+    mov fs:edi, al
+
+    inc esi
+    inc edi
+    loop Label_Move_kernel
+
+    pop edi
+    pop si
+    pop cx
+    pop ax
+
 	call	Func_GetFATEntry                        ; 计算文件的下一个簇号
 	cmp	ax,	0fffh
 	jz	Label_File_Loaded                       ; 文件完成加载
@@ -348,8 +282,111 @@ Label_Go_On_Loading_File:                               ; 开始加载目标文�
 	jmp	Label_Go_On_Loading_File
 
 Label_File_Loaded:
+;	jmp	BaseOfLoader:OffsetOfLoader             ; 跳转到目标位置开始执行
 
-	jmp	BaseOfLoader:OffsetOfLoader             ; 跳转到目标位置开始执行
+    hlt
+; 查询硬件信息放入到指定位置
+; 下面准备进入模式切换
+; 进入32位保护模式
+    cli  ;关闭中断，没有准备中断描述符表
+    lgdt [gdt_ptr]
+    mov eax, cr0
+    or eax, 0x01
+    mov cr0, eax
+    ; 此时还只是16位的保护模式
+    jmp dword 0x08:Label_Protection_Mode
+Label_Protection_Mode:
+    [bits 32] ; 以后的代码都是32位的编译方式
+    ; 初始化所有的数据段
+    mov eax, 0x10
+    mov ds, ax
+    mov fs, ax
+    mov gs, ax
+    mov es, ax
+    mov ss, ax
+    mov esp, 0x7e00
+
+; 进入ia-e32模式
+; 跳过了ia-e32模式的校验
+; 准备ia-e32模式下段描述符表
+    lgdt [0x10000 + gdt64_ptr]
+
+; 准备ia-e32模式下的页表，开启PAE模式, 设置cr3
+; 设置页表就需要考虑到页表所在的内存位置，以及页表的内容，几级页表
+; 页表所在的线性地址为0x90000, 是开启PAR模式下的页表，每一个页表项位是8个字节
+        ; 每一个页表都是4kb的大小，表现在地址上就是相差0x1000
+        ; 3级页表, 2MB的物理页面大小
+        ; 页目录表的基地址为0x90000 , PML4E
+	mov	dword	[0x90000],	0x91007
+	mov	dword	[0x90004],	0x00000
+        ; 两个页目录表项指向同一个页表
+        ; 这样做是会存在2套不同的线性地址映射到同一个物理地址
+        ; 0x0 - 0xbfffff  -> 0x0 - 0xbfffff
+        ; 不想算了
+	mov	dword	[0x90800],	0x91007
+	mov	dword	[0x90804],	0x00000
+
+        ; PDPT
+	mov	dword	[0x91000],	0x92007
+	mov	dword	[0x91004],	0x00000
+
+        ; PDT + PTE
+        ; 完成低12MB的物理地址的物理地址映射，填充了6个页表项
+	mov	dword	[0x92000],	0x000083
+	mov	dword	[0x92004],	0x000000
+
+	mov	dword	[0x92008],	0x200083
+	mov	dword	[0x9200c],	0x000000
+
+	mov	dword	[0x92010],	0x400083
+	mov	dword	[0x92014],	0x000000
+
+	mov	dword	[0x92018],	0x600083
+	mov	dword	[0x9201c],	0x000000
+
+	mov	dword	[0x92020],	0x800083
+	mov	dword	[0x92024],	0x000000
+
+	mov	dword	[0x92028],	0xa00083
+	mov	dword	[0x9202c],	0x000000
+
+
+        ; 开启pae模式，置位cr4中的第5位
+        mov eax, cr4
+        or eax, 0x20
+	mov cr4, eax
+
+        mov eax, 0x90000
+        mov cr3, eax
+
+; 开启ia-e32模式
+
+	mov ecx, 0x0c0000080		;IA32_EFER
+	rdmsr
+
+	or eax,	0x100
+	wrmsr
+
+; 开启分页, 进入ia-e32模式
+       	mov eax, cr0
+        or eax, 0x8000_0001
+	mov	cr0,	eax
+
+; 此时还是32位兼容模式
+; 执行一次远跳转设置CS寄存器以及清除指令流水线
+        jmp 0x08:Label_IA_E32
+Label_IA_E32:
+        [bits 64]
+        ; 设置各个段寄存器
+        mov ax, 0x10
+        mov ds, ax
+        mov es, ax
+        mov gs, ax
+        mov fs, ax
+        mov ss, ax
+        mov rsp, 0x7e00
+
+
 
 
 ; 定义加载所需要的数据
@@ -362,7 +399,7 @@ section data
     SectorNo          dw 0
     RootDirSizeForLoop dw RootDirSectors
     KernelFileName   db 'KERNEL  BIN'
-
+    OffsetOfKernelFileCount dd OffsetOfKernelFile
 ; 段描述符相关的定义
 section gdt32 align=8
 gdt32:
