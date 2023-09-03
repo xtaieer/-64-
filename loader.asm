@@ -319,7 +319,7 @@ Label_Move_kernel:
 	mov	dx,	RootDirSectors                  ; 开始文件的下一个簇的加载
 	add	ax,	dx
 	add	ax,	SectorBalance
-	add	bx,	[BPB_BytesPerSec]
+;	add	bx,	[BPB_BytesPerSec]         ; 这句不需要，内核每次加载到相同的位置，然后转移
 	jmp	Label_Go_On_Loading_File
 
 Label_File_Loaded:
@@ -635,17 +635,21 @@ Label_Protection_Mode:
 
 ; 此时还是32位兼容模式
 ; 执行一次远跳转设置CS寄存器以及清除指令流水线
-        jmp 0x08:Label_IA_E32
-Label_IA_E32:
-        [bits 64]
+; 还需要暂时工作在32位兼容模式下，貌似长模式不支持远跳转指令了
+;        jmp 0x08:Label_IA_E32
+;Label_IA_E32:
+;        [bits 64]
         ; 设置各个段寄存器
-        mov ax, 0x10
-        mov ds, ax
-        mov es, ax
-        mov gs, ax
-        mov fs, ax
-        mov ss, ax
-        mov rsp, 0x7e00
+;        mov ax, 0x10
+;        mov ds, ax
+;        mov es, ax
+;        mov gs, ax
+;        mov fs, ax
+;        mov ss, ax
+;        mov sp, 0x7e00
+
+; 跳转到内核执行
+        jmp 0x08:OffsetOfKernelFile
 
 ; 定义加载所需要的数据
 section data
