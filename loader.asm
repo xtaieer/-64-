@@ -15,6 +15,7 @@ OffsetOfKernelFile	equ	0x100000
 ; 内核加载的临时转存区域，
 BaseTmpOfKernelAddr	equ	0x00
 OffsetTmpOfKernelFile	equ	0x7e00
+MemoryStructBufferAddr	equ	0x7e00
 
 RootDirSectors                  equ 14     ;根目录的扇区数量 （14 * 512 / 32）
 SectorNumOfRootDirStart         equ 19     ; 根目录起始的扇区号
@@ -104,6 +105,44 @@ Label_Even_2:
 	pop	es
 	ret
 
+;=======	display num in al
+Label_DispAL:
+
+	push	ecx
+	push	edx
+	push	edi
+
+	mov	edi,	[DisplayPosition]
+	mov	ah,	0Fh
+	mov	dl,	al
+	shr	al,	4
+	mov	ecx,	2
+.begin:
+
+	and	al,	0Fh
+	cmp	al,	9
+	ja	.1
+	add	al,	'0'
+	jmp	.2
+.1:
+
+	sub	al,	0Ah
+	add	al,	'A'
+.2:
+
+	mov	[gs:edi],	ax
+	add	edi,	2
+
+	mov	al,	dl
+	loop	.begin
+
+	mov	[DisplayPosition],	edi
+
+	pop	edi
+	pop	edx
+	pop	ecx
+
+	ret
 
 ; loader的代码这里开始执行
 Label_Start:
@@ -253,7 +292,7 @@ Label_Go_On_Loading_File:                               ; 开始加载目标文�
     push edi
 
     mov cx, 0x200 ; 一簇512（0x200）个字节
-        ; 跳过fs的设置
+    ; 跳过fs的设置
     mov si,  OffsetTmpOfKernelFile ;转存的源地址, 每次转存是一样的
     mov edi, [OffsetOfKernelFileCount] ; 目标地址，每次执行转存时目标地址都不同，把目标地址记录在内存中
 
@@ -264,11 +303,13 @@ Label_Move_kernel:
     inc esi
     inc edi
     loop Label_Move_kernel
+    mov [OffsetOfKernelFileCount], edi
 
     pop edi
     pop si
     pop cx
     pop ax
+
 
 	call	Func_GetFATEntry                        ; 计算文件的下一个簇号
 	cmp	ax,	0fffh
@@ -282,10 +323,230 @@ Label_Move_kernel:
 	jmp	Label_Go_On_Loading_File
 
 Label_File_Loaded:
-;	jmp	BaseOfLoader:OffsetOfLoader             ; 跳转到目标位置开始执行
+	mov	ax, 0x0b800
+	mov	gs, ax
+	mov	ah, 0x0f				; 0000: 黑底    1111: 白字
+	mov	al, 'G'
+	mov	[gs:((80 * 0 + 39) * 2)], ax	; 屏幕第 0 行, 第 39 列。
 
-    hlt
+; 关闭软盘
+KillMotor:
+	push	dx
+	mov	dx,	0x03f2
+	mov	al,	0
+	out	dx,	al
+	pop	dx
+
 ; 查询硬件信息放入到指定位置
+;=======	get memory address size type
+
+	mov	ax,	1301h
+	mov	bx,	000Fh
+	mov	dx,	0400h		;row 4
+	mov	cx,	44
+	push	ax
+	mov	ax,	ds
+	mov	es,	ax
+	pop	ax
+	mov	bp,	StartGetMemStructMessage
+	int	10h
+
+	mov	ebx,	0
+	mov	ax,	0x00
+	mov	es,	ax
+	mov	di,	MemoryStructBufferAddr    ; 内存相关的信息的存储地址 es:di
+
+Label_Get_Mem_Struct:
+
+	mov	eax,	0x0E820
+	mov	ecx,	20
+	mov	edx,	0x534D4150
+	int	15h
+
+	jc	Label_Get_Mem_Fail
+	add	di,	20
+	inc	dword	[MemStructNumber]
+
+	cmp	ebx,	0
+	jne	Label_Get_Mem_Struct
+	jmp	Label_Get_Mem_OK
+
+Label_Get_Mem_Fail:
+
+	mov	dword	[MemStructNumber],	0
+
+	mov	ax,	1301h
+	mov	bx,	008Ch
+	mov	dx,	0500h		;row 5
+	mov	cx,	23
+	push	ax
+	mov	ax,	ds
+	mov	es,	ax
+	pop	ax
+	mov	bp,	GetMemStructErrMessage
+	int	10h
+
+Label_Get_Mem_OK:
+
+	mov	ax,	1301h
+	mov	bx,	000Fh
+	mov	dx,	0600h		;row 6
+	mov	cx,	29
+	push	ax
+	mov	ax,	ds
+	mov	es,	ax
+	pop	ax
+	mov	bp,	GetMemStructOKMessage
+	int	10h
+
+;=======	get SVGA information
+
+	mov	ax,	1301h
+	mov	bx,	000Fh
+	mov	dx,	0800h		;row 8
+	mov	cx,	23
+	push	ax
+	mov	ax,	ds
+	mov	es,	ax
+	pop	ax
+	mov	bp,	StartGetSVGAVBEInfoMessage
+	int	10h
+
+	mov	ax,	0x00
+	mov	es,	ax
+	mov	di,	0x8000
+	mov	ax,	4F00h
+
+	int	10h
+
+	cmp	ax,	004Fh
+
+	jz	.KO
+
+;=======	Fail
+
+	mov	ax,	1301h
+	mov	bx,	008Ch
+	mov	dx,	0900h		;row 9
+	mov	cx,	23
+	push	ax
+	mov	ax,	ds
+	mov	es,	ax
+	pop	ax
+	mov	bp,	GetSVGAVBEInfoErrMessage
+	int	10h
+
+	jmp	$
+
+.KO:
+
+	mov	ax,	1301h
+	mov	bx,	000Fh
+	mov	dx,	0A00h		;row 10
+	mov	cx,	29
+	push	ax
+	mov	ax,	ds
+	mov	es,	ax
+	pop	ax
+	mov	bp,	GetSVGAVBEInfoOKMessage
+	int	10h
+
+;=======	Get SVGA Mode Info
+
+	mov	ax,	1301h
+	mov	bx,	000Fh
+	mov	dx,	0C00h		;row 12
+	mov	cx,	24
+	push	ax
+	mov	ax,	ds
+	mov	es,	ax
+	pop	ax
+	mov	bp,	StartGetSVGAModeInfoMessage
+	int	10h
+
+
+	mov	ax,	0x00
+	mov	es,	ax
+	mov	si,	0x800e
+
+	mov	esi,	dword	[es:si]
+	mov	edi,	0x8200
+
+Label_SVGA_Mode_Info_Get:
+
+	mov	cx,	word	[es:esi]
+
+;=======	display SVGA mode information
+
+	push	ax
+
+	mov	ax,	00h
+	mov	al,	ch
+	call	Label_DispAL
+
+	mov	ax,	00h
+	mov	al,	cl
+	call	Label_DispAL
+
+	pop	ax
+
+;=======
+
+	cmp	cx,	0FFFFh
+	jz	Label_SVGA_Mode_Info_Finish
+
+	mov	ax,	4F01h
+	int	10h
+
+	cmp	ax,	004Fh
+
+	jnz	Label_SVGA_Mode_Info_FAIL
+
+	inc	dword		[SVGAModeCounter]
+	add	esi,	2
+	add	edi,	0x100
+
+	jmp	Label_SVGA_Mode_Info_Get
+
+Label_SVGA_Mode_Info_FAIL:
+
+	mov	ax,	1301h
+	mov	bx,	008Ch
+	mov	dx,	0D00h		;row 13
+	mov	cx,	24
+	push	ax
+	mov	ax,	ds
+	mov	es,	ax
+	pop	ax
+	mov	bp,	GetSVGAModeInfoErrMessage
+	int	10h
+
+Label_SET_SVGA_Mode_VESA_VBE_FAIL:
+
+	jmp	$
+
+Label_SVGA_Mode_Info_Finish:
+
+	mov	ax,	1301h
+	mov	bx,	000Fh
+	mov	dx,	0E00h		;row 14
+	mov	cx,	30
+	push	ax
+	mov	ax,	ds
+	mov	es,	ax
+	pop	ax
+	mov	bp,	GetSVGAModeInfoOKMessage
+	int	10h
+
+;=======	set the SVGA mode(VESA VBE)
+
+	mov	ax,	4F02h
+	mov	bx,	4180h	;========================mode : 0x180 or 0x143
+	int 	10h
+
+	cmp	ax,	004Fh
+	jnz	Label_SET_SVGA_Mode_VESA_VBE_FAIL
+
 ; 下面准备进入模式切换
 ; 进入32位保护模式
     cli  ;关闭中断，没有准备中断描述符表
@@ -386,20 +647,35 @@ Label_IA_E32:
         mov ss, ax
         mov rsp, 0x7e00
 
-
-
-
 ; 定义加载所需要的数据
 section data
     BaseBootMessage   db 'Start Boot。。。。'
-    NoLoaderMessage   db 'There is not loader.bin'
     FileFoundMessage  db 'Found the loader.bin'
 
     Odd               db 0
     SectorNo          dw 0
     RootDirSizeForLoop dw RootDirSectors
-    KernelFileName   db 'KERNEL  BIN'
+    KernelFileName   db 'KERNEL  BIN', 0
     OffsetOfKernelFileCount dd OffsetOfKernelFile
+
+    MemStructNumber		dd	0
+    SVGAModeCounter		dd	0
+    DisplayPosition		dd	0
+
+    StartLoaderMessage:	db	"Start Loader"
+    NoLoaderMessage:	db	"ERROR:No KERNEL Found"
+    StartGetMemStructMessage:	db	"Start Get Memory Struct (address,size,type)."
+    GetMemStructErrMessage:	db	"Get Memory Struct ERROR"
+    GetMemStructOKMessage:	db	"Get Memory Struct SUCCESSFUL!"
+
+    StartGetSVGAVBEInfoMessage:	db	"Start Get SVGA VBE Info"
+    GetSVGAVBEInfoErrMessage:	db	"Get SVGA VBE Info ERROR"
+    GetSVGAVBEInfoOKMessage:	db	"Get SVGA VBE Info SUCCESSFUL!"
+
+    StartGetSVGAModeInfoMessage:	db	"Start Get SVGA Mode Info"
+    GetSVGAModeInfoErrMessage:	db	"Get SVGA Mode Info ERROR"
+    GetSVGAModeInfoOKMessage:	db	"Get SVGA Mode Info SUCCESSFUL!"
+
 ; 段描述符相关的定义
 section gdt32 align=8
 gdt32:
