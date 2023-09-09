@@ -69,16 +69,129 @@ entry64:
 	// 这个线性地址表明了系统位于线性地址的上半部分
 	movq	$0xffff800000007E00,	%rsp		/* rsp address */
 
+setup_IDT:							
+	leaq	ignore_int(%rip),	%rdx // rdx中存储了中断目标处理过程的入口地址
+	movq	$(0x08 << 16),	%rax
+	movw	%dx,	%ax
+	movq	$(0x8E00 << 32),	%rcx		
+	addq	%rcx,	%rax
+	movl	%edx,	%ecx
+	shrl	$16,	%ecx
+	shlq	$48,	%rcx
+	addq	%rcx,	%rax
+	shrq	$32,	%rdx          // 以上逻辑是为了构造一个16B的中断描述符, 存储在rdx:rax
+	leaq	IDT_Table(%rip),	%rdi  // rdi中存储了中断描述符表的基地址
+	mov	$256,	%rcx                  // 在中断描述符表中填充256个中断描述符
+rp_sidt:
+	movq	%rax,	(%rdi)
+	movq	%rdx,	8(%rdi)
+	addq	$0x10,	%rdi
+	dec	%rcx
+	jne	rp_sidt                     // 循环填充
+
+setup_TSS64:
+	leaq	TSS64_Table(%rip),	%rdx   // rdx tss的基地址
+	xorq	%rax,	%rax
+	xorq	%rcx,	%rcx               // rcx和rax清零
+	movq	$0x89,	%rax
+	shlq	$40,	%rax
+	movl	%edx,	%ecx
+	shrl	$24,	%ecx
+	shlq	$56,	%rcx
+	addq	%rcx,	%rax
+	xorq	%rcx,	%rcx
+	movl	%edx,	%ecx
+	andl	$0xffffff,	%ecx
+	shlq	$16,	%rcx
+	addq	%rcx,	%rax
+	addq	$103,	%rax             // 以上逻辑是为了构造一个TSS的描述符，16B, rdx:rax
+	leaq	GDT_Table(%rip),	%rdi 
+	movq	%rax,	64(%rdi)
+	shrq	$32,	%rdx
+	movq	%rdx,	72(%rdi)        // TSS的描述符需要注册到GDT中
+
+	mov	$0x40,	%ax
+	ltr	%ax                         // 加载tr寄存器，ax是TSS描述符在GDT中的选择子
+
 	movq	go_to_kernel(%rip),	%rax		/* movq address */
 	pushq	$0x08
 	pushq	%rax
 
-    // 又执行了一次远跳转， jmp 0x08:rax, 同样是为了更新cs寄存器
+	// 又执行了一次远跳转， jmp 0x08:rax, 同样是为了更新cs寄存器
 	// 正式工作在长模式下
 	lretq
 
+
 go_to_kernel:
 	.quad	Start_Kernel
+
+//=======	ignore_int
+// 中断处理程序
+ignore_int:
+	cld
+	pushq	%rax
+	pushq	%rbx
+	pushq	%rcx
+	pushq	%rdx
+	pushq	%rbp
+	pushq	%rdi
+	pushq	%rsi
+
+	pushq	%r8
+	pushq	%r9
+	pushq	%r10
+	pushq	%r11
+	pushq	%r12
+	pushq	%r13
+	pushq	%r14
+	pushq	%r15
+
+	movq	%es,	%rax
+	pushq	%rax
+	movq	%ds,	%rax
+	pushq	%rax
+
+	movq	$0x10,	%rax
+	movq	%rax,	%ds
+	movq	%rax,	%es           // 对数据段的保存，并设置ds和es
+
+	leaq	int_msg(%rip),	%rax			/* leaq get address */
+	pushq	%rax
+	movq	%rax,	%rdx          // rdx fmt 格式化字符串
+	movq	$0x00000000,	%rsi  // BKcolor 背景色
+	movq	$0x00ff0000,	%rdi  // FRcolor 前景色
+	movq	$0,	%rax
+	callq	color_printk        // 通过汇编的方式调用color_printk方法
+	addq	$0x8,	%rsp
+
+Loop:
+	jmp	Loop	               // 系统会在这里死循环
+
+	popq	%rax
+	movq	%rax,	%ds
+	popq	%rax
+	movq	%rax,	%es
+
+	popq	%r15
+	popq	%r14
+	popq	%r13
+	popq	%r12
+	popq	%r11
+	popq	%r10
+	popq	%r9
+	popq	%r8
+
+	popq	%rsi
+	popq	%rdi
+	popq	%rbp
+	popq	%rdx
+	popq	%rcx
+	popq	%rbx
+	popq	%rax
+	iretq
+
+int_msg:
+	.asciz "Unknown interrupt or fault at RIP\n"
 
 //=======	init page
 .align 8
