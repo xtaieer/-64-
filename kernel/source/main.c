@@ -61,7 +61,9 @@ void Start_Kernel(void)
 		addr += 1;
 	}
 
-	color_printk(WHITE, BLACK, "Hello World!\n");
+	color_printk(WHITE, BLACK, "Hello World The new make file!\n");
+
+	int i = 1 / 0;
 
 	while(1)
 		;
