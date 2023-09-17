@@ -19,18 +19,25 @@ inc = ./kernel/include
 all: $(out)/system
 	objcopy -I elf64-x86-64 -S -R ".eh_frame" -R ".comment" -O binary $(out)/system $(out)/kernel.bin
 
-$(out)/system:	$(out)/head.o $(out)/main.o $(out)/printk.o
-	ld -b elf64-x86-64 -z muldefs -o $(out)/system $(out)/head.o $(out)/main.o $(out)/printk.o -T Kernel.lds 
+$(out)/system: $(out)/head.o $(out)/entry.o $(out)/trap.o $(out)/main.o $(out)/printk.o 
+	ld -b elf64-x86-64 -z muldefs -o $(out)/system $(out)/head.o $(out)/entry.o $(out)/trap.o $(out)/main.o $(out)/printk.o -T Kernel.lds 
 
-$(out)/main.o:	$(source)/main.c
+$(out)/main.o: $(source)/main.c
 	gcc -fno-stack-protector -mcmodel=large -fno-builtin -m64 -c $(source)/main.c -I $(inc) -o $(out)/main.o
 
-$(out)/head.o:	$(source)/head.S
+$(out)/head.o: $(source)/head.S
 	gcc -fno-stack-protector -E $(source)/head.S > $(out)/_head.s
 	as --64 -o $(out)/head.o $(out)/_head.s
 
+$(out)/entry.o: $(source)/entry.S
+	gcc -E  $(source)/entry.S > $(out)/entry.s -I $(inc)
+	as --64 -o $(out)/entry.o $(out)/entry.s 
+
+$(out)/trap.o: $(source)/trap.c
+	gcc -mcmodel=large -fno-builtin -m64 -fno-stack-protector -c $(source)/trap.c -I $(inc) -o $(out)/trap.o 
+
 $(out)/printk.o: $(source)/printk.c
-	gcc -mcmodel=large -fno-builtin -m64 -c $(source)/printk.c -fno-stack-protector -o $(out)/printk.o -I $(inc)
+	gcc -mcmodel=large -fno-builtin -m64 -c $(source)/printk.c -fno-stack-protector -I $(inc) -o $(out)/printk.o 
 
 clean:
 	rm -rf *.o *.s~ *.s *.S~ *.c~ *.h~ system  Makefile~ Kernel.lds~ kernel.bin 
