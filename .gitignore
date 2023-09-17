@@ -3,3 +3,8 @@
 *.o
 *.S
 output/*
+*.sln
+*.vcxproj
+*.filters
+*.user
+kernel/.vs
