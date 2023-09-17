@@ -13,6 +13,8 @@
 *
 ***************************************************/
 #include"printk.h"
+#include"gate.h"
+#include"trap.h"
 
 void SetColor(int *addr, char r, char g, char b);
 
@@ -61,10 +63,22 @@ void Start_Kernel(void)
 		addr += 1;
 	}
 
-	color_printk(WHITE, BLACK, "Hello World The new make file!\n");
+	color_printk(WHITE, BLACK, "Hello World 4\n");
+
+	sys_vector_init();
+	set_tss64(0xffff800000007c00, 
+		0xffff800000007c00, 
+		0xffff800000007c00, 
+		0xffff800000007c00, 
+		0xffff800000007c00, 
+		0xffff800000007c00, 
+		0xffff800000007c00, 
+		0xffff800000007c00, 
+		0xffff800000007c00, 
+		0xffff800000007c00);
+	load_TR(8);
 
 	int i = 1 / 0;
-
 	while(1)
 		;
 }
