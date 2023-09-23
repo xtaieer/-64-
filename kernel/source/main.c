@@ -15,8 +15,11 @@
 #include"printk.h"
 #include"gate.h"
 #include"trap.h"
+#include"memory.h"
 
 void SetColor(int *addr, char r, char g, char b);
+
+struct Global_Memory_Descriptor memory_management_struct = { {0},0 };
 
 void Start_Kernel(void)
 {
@@ -78,7 +81,8 @@ void Start_Kernel(void)
 		0xffff800000007c00);
 	load_TR(8);
 
-	int i = 1 / 0;
+//	int i = 1 / 0;
+	init_memory();
 	while(1)
 		;
 }
