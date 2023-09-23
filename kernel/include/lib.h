@@ -123,7 +123,7 @@ inline void * memcpy(void *From,void * To,long Num)
 		FirstPart < SecondPart		=>	-1
 */
 
-inline int memcmp(void * FirstPart,void * SecondPart,long Count)
+int memcmp(void * FirstPart,void * SecondPart,long Count)
 {
 	register int __res;
 
@@ -146,7 +146,7 @@ inline int memcmp(void * FirstPart,void * SecondPart,long Count)
 		set memory at Address with C ,number is Count
 */
 
-inline void * memset(void * Address,unsigned char C,long Count)
+void * memset(void * Address,unsigned char C,long Count)
 {
 	int d0,d1;
 	unsigned long tmp = C * 0x0101010101010101UL;
