@@ -17,6 +17,11 @@
 #include"trap.h"
 #include"memory.h"
 
+extern char _text;
+extern char _etext;
+extern char _edata;
+extern char _end;
+
 void SetColor(int *addr, char r, char g, char b);
 
 struct Global_Memory_Descriptor memory_management_struct = { {0},0 };
@@ -66,7 +71,7 @@ void Start_Kernel(void)
 		addr += 1;
 	}
 
-	color_printk(WHITE, BLACK, "Hello World 4\n");
+	color_printk(WHITE, BLACK, "Hello World 3\n");
 
 	sys_vector_init();
 	set_tss64(0xffff800000007c00, 
@@ -82,6 +87,11 @@ void Start_Kernel(void)
 	load_TR(8);
 
 //	int i = 1 / 0;
+	memory_management_struct.start_code = (unsigned long)&_text;
+	memory_management_struct.end_code = (unsigned long)&_etext;
+	memory_management_struct.end_data = (unsigned long)&_edata;
+	memory_management_struct.end_brk = (unsigned long)&_end;
+
 	init_memory();
 	while(1)
 		;
