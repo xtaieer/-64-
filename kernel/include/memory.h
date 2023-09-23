@@ -52,6 +52,12 @@
 #define Virt_To_2M_Page(kaddr)	(memory_management_struct.pages_struct + (Virt_To_Phy(kaddr) >> PAGE_2M_SHIFT))
 #define Phy_to_2M_Page(kaddr)	(memory_management_struct.pages_struct + ((unsigned long)(kaddr) >> PAGE_2M_SHIFT))
 
+#define PAGE_SHIFT PAGE_4K_SHIFT
+#define PAGE_SIZE (1UL << PAGE_SHIFT)
+#define PAGE_MASK (~(PAGE_SIZE - 1))
+#define PAGE_ALIGN(addr) (((unsigned long)(addr) + PAGE_SIZE - 1) & PAGE_MASK)
+#define Virt_To_PAGE(kaddr) (memory_management_struct.pages_struct + (Virt_To_Phy(kaddr) >> PAGE_SHIFT))
+#define Phy_To_PAGE(kaddr) (memory_management_struct.pages_struct + ((unsigned long)(kaddr) >> PAGE_SHIFT))
 
 ////page table attribute
 
